@@ -22,5 +22,7 @@ Route::middleware('auth:api')->group(function () {
 
 
     Route::get('/parts/qr/{qrCode}', [PartController::class,'showByQr']);
-    Route::get('/parts/qr_code/{part_id}', [PartController::class,'']);
+    Route::get('/parts/qr_code/{part_id}', [PartController::class,'getPartQR']);
+
+    Route::get('/checkout/history/{part_id}', [CheckoutRecordController::class,'history']);
 });

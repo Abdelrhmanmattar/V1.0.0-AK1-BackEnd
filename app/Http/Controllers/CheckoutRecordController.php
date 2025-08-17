@@ -122,7 +122,7 @@ class CheckoutRecordController extends Controller
         $rec->delete(); // soft delete
         return response()->json(['message' => 'Checkout record deleted']);
     }
-    public function histort(int $part_id)
+    public function history(int $part_id)
     {
         $rec = CheckoutRecord::with(['part','user'])
                ->where('part_id', $part_id)->get();

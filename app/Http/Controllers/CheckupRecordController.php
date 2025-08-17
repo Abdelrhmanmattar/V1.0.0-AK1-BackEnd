@@ -6,13 +6,17 @@ use App\Models\CheckupRecord;
 use App\Models\Part;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use PgSql\Lob;
+
 class CheckupRecordController extends Controller
 {
     protected function authorizePart(Part $part): void
     {
         $role = Auth::user()->role;
+        Log::info($role . $part->type);
         if ($role === 'devices_manager' && $part->type !== 'device') abort(403);
         if ($role === 'furniture_manager' && $part->type !== 'furniture') abort(403);
     }
@@ -57,7 +61,7 @@ class CheckupRecordController extends Controller
             'checkup_date'      => ['required', 'date'],
             'status'            => ['required', Rule::in(['good','needs-attention','needs-repair'])],
             'notes'             => ['nullable', 'string'],
-            'next_checkup_date' => ['required', 'date', 'after_or_equal:checkup_date'],
+            'next_checkup_date' => ['date', 'after_or_equal:checkup_date'],
             'checkup_photos'    => ['nullable'],
             'checkup_photos.*'  => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
         ]);
@@ -96,6 +100,7 @@ class CheckupRecordController extends Controller
     public function show($id)
     {
         $rec = CheckupRecord::with(['part:id,type,name', 'user:id,name'])->findOrFail($id);
+        Log::info($rec);
         $this->authorizePart($rec->part);
         return response()->json($rec);
     }
