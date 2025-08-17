@@ -12,10 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('parts', function (Blueprint $table) {
- $table->id();
+             $table->id();
 
             $table->string('part_number')->index('idx_part_number');
             $table->string('serial_number')->nullable()->unique();
+            
+            $table->string('qr',512)->unique(); // generated string
+
 
             $table->string('name');
             $table->enum('facility_classification', ['general','directDedicated','indirectDedicated','private']);
@@ -50,10 +53,10 @@ return new class extends Migration
             $table->index(['type','status','department_id'], 'idx_type_status_dept');
             $table->index(['location','type','status'], 'idx_loc_type_status');
 
-            // DB-level checks (MySQL 8+)
-            $table->check('price >= 0');
-            $table->check('vat >= 0 AND vat <= 100');
-            $table->check('(all_vat IS NULL) OR (all_vat >= 0)');
+            // // DB-level checks (MySQL 8+)
+            // $table->check('price >= 0');
+            // $table->check('vat >= 0 AND vat <= 100');
+            // $table->check('(all_vat IS NULL) OR (all_vat >= 0)');
         });
     }
 

@@ -45,11 +45,15 @@ class CheckoutRecordController extends Controller
             'notes'               => ['nullable', 'string'],
         ]);
 
-        $part = Part::findOrFail($data['part_id']);
+        $part = Part::find($data['part_id']);
+        if(!$part)
+        {
+            return response()->json(["message"=>"part not found"],404);
+        }
         $this->authorizePart($part);
 
         if ($part->status === 'checked-out') {
-            return response()->json(['message' => 'Part is already checked out'], 422);
+            return response()->json(['success'=>false,"error"=> '"Partnotavailableforcheckout'], 422);
         }
 
         return DB::transaction(function () use ($data, $part) {
@@ -117,5 +121,16 @@ class CheckoutRecordController extends Controller
         $this->authorizePart($rec->part);
         $rec->delete(); // soft delete
         return response()->json(['message' => 'Checkout record deleted']);
+    }
+    public function histort(int $part_id)
+    {
+        $rec = CheckoutRecord::with(['part','user'])
+               ->where('part_id', $part_id)->get();
+
+        if($rec->count() == 0) return response()->json(['success'=>false,'message'=> 'Part not found'],404);
+
+        $this->authorizePart($rec->part);
+        return response()->json(['success'=>true,'data'=>$rec ],200);
+
     }
 }

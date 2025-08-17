@@ -6,8 +6,8 @@ use App\Models\CheckupRecord;
 use App\Models\Part;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
-
 class CheckupRecordController extends Controller
 {
     protected function authorizePart(Part $part): void
@@ -15,6 +15,25 @@ class CheckupRecordController extends Controller
         $role = Auth::user()->role;
         if ($role === 'devices_manager' && $part->type !== 'device') abort(403);
         if ($role === 'furniture_manager' && $part->type !== 'furniture') abort(403);
+    }
+
+    // Store uploaded photos (public disk) and return their URLs
+    protected function storeUploadedPhotos(Request $request, Part $part): array
+    {
+        $paths = [];
+        $files = $request->file('checkup_photos');
+
+        if (!$files) return $paths;
+
+        $files = is_array($files) ? $files : [$files];
+
+        foreach ($files as $file) {
+            if (!$file) continue;
+            $path = $file->store("checkups/{$part->id}", 'public');
+            $paths[] = Storage::disk('public')->url($path);
+        }
+
+        return $paths;
     }
 
     // GET /api/checkup-records
@@ -39,14 +58,20 @@ class CheckupRecordController extends Controller
             'status'            => ['required', Rule::in(['good','needs-attention','needs-repair'])],
             'notes'             => ['nullable', 'string'],
             'next_checkup_date' => ['required', 'date', 'after_or_equal:checkup_date'],
-            'checkup_photos'    => ['nullable', 'array'],
-            'checkup_photos.*'  => ['string'],
+            'checkup_photos'    => ['nullable'],
+            'checkup_photos.*'  => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
         ]);
 
-        $part = Part::findOrFail($data['part_id']);
+        $part = Part::find($data['part_id']);
+        if(!$part)
+        {
+            return response()->json(["success"=>false,"error"=>"Part not found"],404);
+        }
         $this->authorizePart($part);
 
         $user = Auth::user();
+        $uploadedPaths = $this->storeUploadedPhotos($request, $part);
+
         $rec = CheckupRecord::create([
             'part_id'           => $part->id,
             'part_name'         => $part->name,
@@ -56,10 +81,9 @@ class CheckupRecordController extends Controller
             'status'            => $data['status'],
             'notes'             => $data['notes'] ?? null,
             'next_checkup_date' => $data['next_checkup_date'],
-            'checkup_photos'    => $data['checkup_photos'] ?? null,
+            'checkup_photos'    => !empty($uploadedPaths) ? $uploadedPaths : null,
         ]);
 
-        // optional: update part's last/next checkup mirrors
         $part->update([
             'last_checkup' => $data['checkup_date'],
             'next_checkup' => $data['next_checkup_date'],
@@ -87,17 +111,28 @@ class CheckupRecordController extends Controller
             'status'            => ['sometimes', Rule::in(['good','needs-attention','needs-repair'])],
             'notes'             => ['nullable', 'string'],
             'next_checkup_date' => ['sometimes', 'date', 'after_or_equal:checkup_date'],
-            'checkup_photos'    => ['nullable', 'array'],
-            'checkup_photos.*'  => ['string'],
+            'checkup_photos'    => ['nullable'],
+            'checkup_photos.*'  => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
         ]);
 
-        $rec->update($data);
+        $payload = $data;
 
-        // keep part mirrors in sync when dates change
-        if (array_key_exists('checkup_date', $data) || array_key_exists('next_checkup_date', $data)) {
+        // If new photos uploaded → merge with existing
+        if ($request->hasFile('checkup_photos')) {
+            $newPaths = $this->storeUploadedPhotos($request, $rec->part);
+            $existing = $rec->checkup_photos ?? [];
+            $payload['checkup_photos'] = array_values(array_unique(array_merge($existing, $newPaths)));
+        } else {
+            // Do not touch existing photos
+            unset($payload['checkup_photos']);
+        }
+
+        $rec->update($payload);
+
+        if (array_key_exists('checkup_date', $payload) || array_key_exists('next_checkup_date', $payload)) {
             $rec->part->update([
-                'last_checkup' => $data['checkup_date'] ?? $rec->checkup_date,
-                'next_checkup' => $data['next_checkup_date'] ?? $rec->next_checkup_date,
+                'last_checkup' => $payload['checkup_date'] ?? $rec->checkup_date,
+                'next_checkup' => $payload['next_checkup_date'] ?? $rec->next_checkup_date,
             ]);
         }
 

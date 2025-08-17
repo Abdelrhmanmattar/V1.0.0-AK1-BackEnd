@@ -37,23 +37,56 @@ class AuthController extends Controller
         ]);
 
         if (!$token = Auth::attempt($credentials)) {
-            return response()->json(['message' => 'Invalid credentials'], 401);
+            return response()->json(['success' => false, 'message' => 'Invalid credentials'], 401);
         }
 
-        return $this->respondWithToken($token);
+        $user = Auth::user();
+        return response()->json([
+            "success" => true,
+            "data" => [
+                "user" => [
+                    "id" => (string) $user->id,
+                    "email" => $user->email,
+                    "name" => $user->name,
+                    "role" => $user->role, // assuming your User model has a `role` field
+                ],
+                "token" => $token, // JWT or bearer token
+            ]
+        ]);
     }
 
     // Get current user
     public function me()
     {
-        return response()->json(Auth::user());
+        $user = Auth::user();
+
+        if (!$user) {
+            return response()->json([
+                "success" => false,
+                "error" => "Unauthorized"
+            ], 401);
+        }
+
+        return response()->json([
+            "success" => true,
+            "data" => [
+                "id" => (string) $user->id,
+                "email" => $user->email,
+                "name" => $user->name,
+                "role" => $user->role, // must be either "furniture_manager" or "devices_manager"
+            ]
+        ], 200);
     }
 
     // Logout (invalidate token)
     public function logout()
     {
-        Auth::logout();
-        return response()->json(['message' => 'Logged out']);
+        try {
+            Auth::logout();
+            return response()->json(['success' => true, 'data' => null], 200);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'error' => 'Unauthorized'], 401);
+        }
     }
 
     protected function respondWithToken(string $token)
