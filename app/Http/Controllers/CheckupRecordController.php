@@ -25,20 +25,39 @@ class CheckupRecordController extends Controller
     protected function storeUploadedPhotos(Request $request, Part $part): array
     {
         $paths = [];
-        $files = $request->file('checkup_photos');
+        $files = $request->file('checkup_photos'); // Get files uploaded under 'checkup_photos'
 
-        if (!$files) return $paths;
+        Log::info( $files);  // Log the files received
 
+        if (!$files) {
+            Log::info('No files received');
+            return $paths;  // Return empty if no files were uploaded
+        }
+
+        // Ensure files are in array format
         $files = is_array($files) ? $files : [$files];
 
         foreach ($files as $file) {
-            if (!$file) continue;
+            if (!$file) {
+                Log::info('Skipping empty file');
+                continue; // Skip if the file is empty
+            }
+
+            Log::info('Storing file: ' . $file->getClientOriginalName());
+
+            // Store file in the 'checkups' directory for this part
             $path = $file->store("checkups/{$part->id}", 'public');
-            $paths[] = Storage::disk('public')->url($path);
+
+            // Store file URL in the array
+            $url = Storage::disk('public')->url($path);
+            Log::info('File stored at: ' . $url);  // Log the file URL
+
+            $paths[] = $url;  // Add URL to array
         }
 
         return $paths;
     }
+
 
     // GET /api/checkup-records
     public function index(Request $request)
@@ -56,10 +75,11 @@ class CheckupRecordController extends Controller
     // POST /api/checkup-records
     public function store(Request $request)
     {
+        Log::info($request->all());
         $data = $request->validate([
             'part_id'           => ['required', 'exists:parts,id'],
             'checkup_date'      => ['required', 'date'],
-            'status'            => ['required', Rule::in(['good','needs-attention','needs-repair'])],
+            'status'            => ['required', Rule::in(['good', 'needs-attention', 'needs-repair'])],
             'notes'             => ['nullable', 'string'],
             'next_checkup_date' => ['date', 'after_or_equal:checkup_date'],
             'checkup_photos'    => ['nullable'],
@@ -67,9 +87,8 @@ class CheckupRecordController extends Controller
         ]);
 
         $part = Part::find($data['part_id']);
-        if(!$part)
-        {
-            return response()->json(["success"=>false,"error"=>"Part not found"],404);
+        if (!$part) {
+            return response()->json(["success" => false, "error" => "Part not found"], 404);
         }
         $this->authorizePart($part);
 
@@ -113,7 +132,7 @@ class CheckupRecordController extends Controller
 
         $data = $request->validate([
             'checkup_date'      => ['sometimes', 'date'],
-            'status'            => ['sometimes', Rule::in(['good','needs-attention','needs-repair'])],
+            'status'            => ['sometimes', Rule::in(['good', 'needs-attention', 'needs-repair'])],
             'notes'             => ['nullable', 'string'],
             'next_checkup_date' => ['sometimes', 'date', 'after_or_equal:checkup_date'],
             'checkup_photos'    => ['nullable'],

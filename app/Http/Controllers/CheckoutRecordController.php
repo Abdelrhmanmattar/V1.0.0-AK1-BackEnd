@@ -6,8 +6,10 @@ use App\Models\CheckoutRecord;
 use App\Models\Part;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class CheckoutRecordController extends Controller
 {
@@ -16,6 +18,25 @@ class CheckoutRecordController extends Controller
         $role = Auth::user()->role;
         if ($role === 'devices_manager' && $part->type !== 'device') abort(403);
         if ($role === 'furniture_manager' && $part->type !== 'furniture') abort(403);
+    }
+
+    // Store uploaded checkout photos (public disk)
+    protected function storeCheckoutPhotos(Request $request, Part $part): array
+    {
+        $paths = [];
+        $files = $request->file('checkout_photos');
+        if (!$files) return $paths;
+        Log::info('photo check correct');
+        $files = is_array($files) ? $files : [$files];
+
+        foreach ($files as $file) {
+            if (!$file) continue;
+            $path = $file->store("checkouts/{$part->id}", 'public');
+            Log::info($path);
+            $paths[] = Storage::disk('public')->url($path);
+        }
+
+        return $paths;
     }
 
     // GET /api/checkout-records
@@ -35,16 +56,17 @@ class CheckoutRecordController extends Controller
     // POST /api/checkout-records  (create checkout)
     public function store(Request $request)
     {
+        Log::info("before valid");
         $data = $request->validate([
             'part_id'             => ['required', 'exists:parts,id'],
             'custody_assigned_to' => ['required', 'string', 'max:255'],
             'usage_type'          => ['required', Rule::in(['internal','external'])],
             'checked_out_at'      => ['nullable', 'date'],
             'checkout_photos'     => ['nullable', 'array'],
-            'checkout_photos.*'   => ['string'],
+            'checkout_photos.*'   => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'notes'               => ['nullable', 'string'],
         ]);
-
+        Log::info("start controller");
         $part = Part::find($data['part_id']);
         if(!$part)
         {
@@ -53,10 +75,13 @@ class CheckoutRecordController extends Controller
         $this->authorizePart($part);
 
         if ($part->status === 'checked-out') {
-            return response()->json(['success'=>false,"error"=> '"Partnotavailableforcheckout'], 422);
+            return response()->json(['success'=>false,"error"=> 'Part is already checked out'], 422);
         }
-
-        return DB::transaction(function () use ($data, $part) {
+        Log::info("we start save .....");
+        // Handle photos upload
+        $uploadedPaths = $this->storeCheckoutPhotos($request, $part);
+        Log::info('We saved photos');
+        return DB::transaction(function () use ($data, $part, $uploadedPaths) {
             $user = Auth::user();
 
             $record = CheckoutRecord::create([
@@ -68,11 +93,11 @@ class CheckoutRecordController extends Controller
                 'usage_type'         => $data['usage_type'],
                 'checked_out_at'     => $data['checked_out_at'] ?? now(),
                 'returned_at'        => null,
-                'checkout_photos'    => $data['checkout_photos'] ?? null,
+                'checkout_photos'    => $uploadedPaths, // store photo URLs
                 'notes'              => $data['notes'] ?? null,
             ]);
 
-            $part->update(['status' => 'checked-out']);
+            $part->update(['status' => 'checked-out']); // Mark part as checked-out
 
             return response()->json($record, 201);
         });
@@ -98,14 +123,20 @@ class CheckoutRecordController extends Controller
             'checked_out_at'      => ['sometimes', 'date'],
             'returned_at'         => ['nullable', 'date'],
             'checkout_photos'     => ['nullable', 'array'],
-            'checkout_photos.*'   => ['string'],
+            'checkout_photos.*'   => ['file', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'notes'               => ['nullable', 'string'],
         ]);
 
-        return DB::transaction(function () use ($rec, $data) {
-            $rec->update($data);
+        // Handle new photo uploads and merge with existing photos
+        $uploadedPaths = [];
+        if ($request->hasFile('checkout_photos')) {
+            $uploadedPaths = $this->storeCheckoutPhotos($request, $rec->part);
+        }
 
-            // If returned_at just set (and was null), mark part available
+        return DB::transaction(function () use ($rec, $data, $uploadedPaths) {
+            $rec->update(array_merge($data, ['checkout_photos' => $uploadedPaths]));
+
+            // Mark part as available if returned_at is set
             if (array_key_exists('returned_at', $data) && $data['returned_at'] && is_null($rec->getOriginal('returned_at'))) {
                 $rec->part->update(['status' => 'available']);
             }
@@ -122,6 +153,8 @@ class CheckoutRecordController extends Controller
         $rec->delete(); // soft delete
         return response()->json(['message' => 'Checkout record deleted']);
     }
+
+    // Get history of checkout records by part
     public function history(int $part_id)
     {
         $rec = CheckoutRecord::with(['part','user'])
@@ -129,8 +162,7 @@ class CheckoutRecordController extends Controller
 
         if($rec->count() == 0) return response()->json(['success'=>false,'message'=> 'Part not found'],404);
 
-        $this->authorizePart($rec->part);
+        $this->authorizePart($rec->first()->part); // authorize based on part's first checkout
         return response()->json(['success'=>true,'data'=>$rec ],200);
-
     }
 }
